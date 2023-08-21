@@ -1,12 +1,11 @@
 """main module"""
 import threading
 
-from uvicorn import Config
-
 import api
 from models import create_db
 from tasks import tasks_thread
 from utils import APIServer, Logger
+from uvicorn import Config
 
 logger = Logger("main")
 

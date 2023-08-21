@@ -1,16 +1,23 @@
 """functions that interacts with locally installed binaries and other utils"""
+import json
 import logging
 import os
 import subprocess
 import threading
-import json
-import uvicorn
-import requests
 
-from models import (Tag, Package, PackageVersion, RegistryConfig,
-                    Vulnerability, HistoricalStatistics, create_session)
-from fastapi import Depends, HTTPException
-from fastapi.security import APIKeyHeader
+import requests
+import uvicorn
+from models import (
+    HistoricalStatistics,
+    Package,
+    PackageVersion,
+    Pagination,
+    RegistryConfig,
+    Tag,
+    Vulnerability,
+    create_session,
+)
+
 stop_flag = threading.Event()
 scan_mutex = threading.Lock()
 
@@ -23,16 +30,6 @@ class APIServer(uvicorn.Server):
     def handle_exit(self, sig: int, frame) -> None:
         stop_flag.set()
         return super().handle_exit(sig, frame)
-
-
-NEPTUNE_SECURITY_KEY = os.getenv("NEPTUNE_SECURITY_KEY")
-if NEPTUNE_SECURITY_KEY:
-    api_key_header = APIKeyHeader(name="x-neptune-key")
-    async def auth_required(x_api_key: str = Depends(api_key_header)):
-        if x_api_key != NEPTUNE_SECURITY_KEY:
-            raise HTTPException(status_code=401, detail="neptune-key Header is invalid")
-else:
-    async def auth_required(): pass
 
 
 def Logger(name, level='INFO'):
@@ -53,18 +50,24 @@ def Logger(name, level='INFO'):
     return log
 
 
-def paginate_query(query, page, size, full_serialize=False):
+async def pagination(page: int | None = 1, per_page: int | None = 20):
+    """dependency for paginating"""
+    return Pagination(page=page, per_page=per_page)
+
+
+
+def paginate_query(query, pg: Pagination, full_serialize=False):
     """returns a properly paginated object from a given sqlalchemy query with offset and limits
     """
     count = query.count()
-    offset = (page - 1) * size
-    limit = size
+    offset = (pg.page - 1) * pg.per_page
+    limit = pg.per_page
     paginated = query.limit(limit).offset(offset).all()
     response = {
-        "items": [i.serialize() for i in paginated] if not full_serialize else [i.serialize(True) for i in paginated],
+        "items": [i.serialize(full_serialize) for i in paginated],
         "total": count,
-        "current_page": page,
-        "per_page": size
+        "current_page": pg.page,
+        "per_page": pg.per_page
     }
     return response
 
@@ -113,8 +116,9 @@ def database_housekeeping():
 
 
 
-def create_statistics(save_to_db=True):
-    session = create_session()
+def create_statistics(session=None):
+    if not session:
+        session = create_session()
 
     all_tags = session.query(Tag).all()
 
@@ -139,11 +143,8 @@ def create_statistics(save_to_db=True):
         high_vulnerabilities_count=session.query(Vulnerability).filter(
             Vulnerability.active == True, Vulnerability.severity == "High").count(),
         critical_vulnerabilities_count=session.query(Vulnerability).filter(Vulnerability.active == True, Vulnerability.severity == "Critical").count())
-    if not save_to_db:
-        return today_stats.serialize()
     session.add(today_stats)
     session.commit()
-    return None
 
 
 def startup_logins():

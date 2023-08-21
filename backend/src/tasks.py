@@ -3,10 +3,16 @@
 import time
 
 from schedule import every, repeat, run_pending
-
-from utils import (Logger, cleanup_images, create_statistics,
-                   database_housekeeping, db_sbom_rescan, grype_update,
-                   startup_logins, stop_flag)
+from utils import (
+    Logger,
+    cleanup_images,
+    create_statistics,
+    database_housekeeping,
+    db_sbom_rescan,
+    grype_update,
+    startup_logins,
+    stop_flag,
+)
 
 tasks_logger = Logger("tasks")
 

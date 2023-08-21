@@ -1,29 +1,36 @@
 """scan endpoints"""
 import json
 import time
-from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from models import (Package, PackageVersion, SBOMJson, Tag, Vulnerability,
-                    get_db)
-from pydantic import BaseModel
+from models import (
+    ImageScanRequest,
+    Package,
+    PackageVersion,
+    SBOMJson,
+    Tag,
+    Vulnerability,
+    get_db,
+)
 from sqlalchemy.orm import Session
-from utils import (Logger, cleanup_images, database_housekeeping, grype_report,
-                   human_readable_size, human_readable_time, scan_mutex,
-                   skopeo_login, skopeo_pull, syft_report)
-
-
-class ImageScanRequest(BaseModel):
-    image: Optional[str]
-    sha: Optional[str]
-    return_error: Optional[bool]
+from utils import (
+    Logger,
+    cleanup_images,
+    create_statistics,
+    grype_report,
+    human_readable_size,
+    human_readable_time,
+    scan_mutex,
+    skopeo_pull,
+    syft_report,
+)
 
 logger = Logger("api")
 api_router = APIRouter(prefix='/api')
 
-@api_router.post("/scan", tags=['config'])
+@api_router.post("/scan", tags=['scanner'])
 def scan_image(scan_request: ImageScanRequest, session: Session = Depends(get_db)):
     """add a new image to neptune, or rescan an already inventoried sha."""
     if scan_request.image:
@@ -79,6 +86,8 @@ def scan_image(scan_request: ImageScanRequest, session: Session = Depends(get_db
         except ValueError:
             image_name, image_tag = image, "latest"
 
+    cleanup_images()
+
     # mutex here to avoid race conditions when adding records concurrently
     with scan_mutex:
         if scan_request.image:
@@ -122,6 +131,9 @@ def scan_image(scan_request: ImageScanRequest, session: Session = Depends(get_db
         for v in vulns:
             is_referenced = session.query(Vulnerability).filter(
                 Vulnerability.name == v["id"]).one_or_none()
+            
+            # If it's already referenced, we should update our record in case the severity was disclosed or other information
+            # was updated on the CVE DB side
             if not is_referenced:
                 logger.info(f"new vuln {v['id']} !")
                 # find the linked package
@@ -152,4 +164,5 @@ def scan_image(scan_request: ImageScanRequest, session: Session = Depends(get_db
                 "scan_time": human_readable_time(int(t1)),
                 "packages": len(s_image.packages),
                 "vulnerabilities": active_vulns}
+    create_statistics(session=session)
     return JSONResponse(response, status_code=400 if active_vulns and scan_request.return_error else 200)

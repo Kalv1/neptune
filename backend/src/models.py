@@ -2,13 +2,22 @@
 """
 import re
 from datetime import datetime
-import time
 
-from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Integer, String, JSON,
-                        Table, create_engine)
+from pydantic import BaseModel
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    create_engine,
+)
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import relationship, sessionmaker
 
 engine = create_engine("sqlite:///data/neptune.db?check_same_thread=false")
 SessionLocal = sessionmaker(autoflush=True, bind=engine)
@@ -22,6 +31,32 @@ _packages = Table('packages_association', Base.metadata,
                   Column('package_id', Integer,
                          ForeignKey('packageversions.id'))
                   )
+
+# Schema models for pydantic
+class Pagination(BaseModel):
+    page: int = 1
+    per_page:int=20
+
+class ImageScanRequest(BaseModel):
+    image: str|None=None
+    sha: str|None=None
+    return_error:bool|None=None
+    
+class RegistryConfigRequest(BaseModel):
+    registry: str
+    user: str
+    password: str
+
+
+class VulnPut(BaseModel):
+    notes: str|None=None
+    active: bool|None=None
+
+
+class PackagePut(BaseModel):
+    notes: str|None=None
+    minimum_version: str|None=None
+
 
 
 class HistoricalStatistics(Base):
@@ -57,7 +92,7 @@ class RegistryConfig(Base):
     user = Column(String(128))
     password = Column(String(128))
 
-    def serialize(self):
+    def serialize(self,full=False):
         return {
             'registry': self.url,
             'user': self.user,
@@ -180,7 +215,7 @@ class Package(Base):
         return cls.versions.any(has_vulnerabilities=True)
 
 
-    def serialize(self):
+    def serialize(self,full=False):
         return {
             'id': self.id,
             'name': self.name,
@@ -236,9 +271,9 @@ class PackageVersion(Base):
 
         # r-pad the shortest with 0s
         max_len = max(len(version_one_ints), len(version_two_ints))
-        for l in [version_one_ints, version_two_ints]:
-            if len(l) < max_len:
-                l += [0] * (max_len - len(l))
+        for length in [version_one_ints, version_two_ints]:
+            if len(length) < max_len:
+                length += [0] * (max_len - len(length))
 
         first_superior = next(
             (i for i in range(max_len) if version_one_ints[i] > version_two_ints[i]), None)
